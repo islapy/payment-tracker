@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { initializeApp } from 'firebase/app';
 import { getAuth, GoogleAuthProvider, signInWithPopup, onAuthStateChanged, signOut } from 'firebase/auth';
-import { getFirestore, collection, doc, setDoc, getDoc, getDocs, query, where, updateDoc, deleteDoc } from 'firebase/firestore';
+import { getFirestore, collection, doc, setDoc, getDoc, getDocs, query, where, updateDoc, deleteDoc, addDoc, serverTimestamp, orderBy } from 'firebase/firestore';
 
 // --- IMPORTANT: This is the configuration for your Firebase project. ---
 const firebaseConfig = {
@@ -33,6 +33,7 @@ const generateMonthRange = (startYear, startMonth, endYear, endMonth) => {
 };
 
 const paymentMonths = generateMonthRange(2025, 8, 2028, 7);
+const APP_VERSION = "v2.1.0";
 
 // --- Components ---
 
@@ -47,6 +48,11 @@ function App() {
     const script = document.createElement('script');
     script.src = "https://cdn.tailwindcss.com";
     document.head.appendChild(script);
+    
+    // Apply tropical background
+    document.body.style.backgroundImage = "url('https://www.transparenttextures.com/patterns/subtle-palm-leaves.png')";
+    document.body.style.backgroundColor = "#f0f4f8";
+
 
     const unsubscribe = onAuthStateChanged(auth, async (currentUser) => {
       if (currentUser) {
@@ -58,8 +64,10 @@ function App() {
         const usersRef = collection(db, "users");
         const q = query(usersRef, where("email", "==", currentUser.email));
         const querySnapshot = await getDocs(q);
+        
+        const isPaymentUser = !querySnapshot.empty;
 
-        if (!querySnapshot.empty) {
+        if (isPaymentUser) {
             const userDoc = querySnapshot.docs[0];
             const userData = userDoc.data();
             
@@ -69,22 +77,19 @@ function App() {
                     nickname: currentUser.displayName || userData.email
                 });
             }
-            setUser({ uid: currentUser.uid, email: currentUser.email, docId: userDoc.id });
+            setUser({ uid: currentUser.uid, email: currentUser.email, docId: userDoc.id, isPaymentUser, photoURL: currentUser.photoURL, displayName: currentUser.displayName });
             setIsAuthorized(true);
+            // Log successful login
+            await addDoc(collection(db, "login_history"), { email: currentUser.email, timestamp: serverTimestamp(), status: "Success" });
         } else if (adminStatus) {
-            // Admin is logging in but doesn't have a user document yet. Let's create one.
-            const userDocRef = doc(db, "users", currentUser.uid);
-            await setDoc(userDocRef, {
-                email: currentUser.email,
-                nickname: currentUser.displayName,
-                payments: {},
-                uid: currentUser.uid
-            });
-            setUser({ uid: currentUser.uid, email: currentUser.email, docId: currentUser.uid });
+            setUser({ uid: currentUser.uid, email: currentUser.email, isPaymentUser: false, photoURL: currentUser.photoURL, displayName: currentUser.displayName });
             setIsAuthorized(true);
+            await addDoc(collection(db, "login_history"), { email: currentUser.email, timestamp: serverTimestamp(), status: "Success (Admin)" });
         } else {
             setUser({ uid: currentUser.uid, email: currentUser.email });
             setIsAuthorized(false);
+            // Log failed (unauthorized) login attempt
+            await addDoc(collection(db, "failed_logins"), { email: currentUser.email, timestamp: serverTimestamp(), status: "Failed: Unauthorized" });
         }
       } else {
         setUser(null);
@@ -113,17 +118,20 @@ function App() {
 
   if (loading) {
       return (
-        <div className="min-h-screen bg-gray-100 flex items-center justify-center">
+        <div className="min-h-screen flex items-center justify-center">
             <div className="text-xl font-semibold">Loading...</div>
         </div>
       )
   }
 
   return (
-    <div className="min-h-screen bg-gray-100 font-sans">
-      <header className="bg-white shadow">
-        <div className="container mx-auto px-4 py-6 flex justify-between items-center">
-          <h1 className="text-3xl font-bold text-gray-800">Payment Tracker</h1>
+    <div className="min-h-screen font-sans">
+      <header className="bg-white/80 backdrop-blur-md shadow sticky top-0 z-10">
+        <div className="container mx-auto px-4 py-4 flex justify-between items-center">
+          <div className="flex items-center space-x-3">
+            {user && <img src={user.photoURL} alt="profile" className="h-10 w-10 rounded-full" />}
+            <h1 className="text-3xl font-bold text-gray-800">Payment Tracker</h1>
+          </div>
           {user ? (
             <button
               onClick={handleLogout}
@@ -134,9 +142,10 @@ function App() {
           ) : (
             <button
               onClick={handleLogin}
-              className="bg-blue-500 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded"
+              className="bg-white border border-gray-300 hover:bg-gray-50 text-gray-700 font-semibold py-2 px-4 rounded-lg shadow-sm flex items-center space-x-2"
             >
-              Login with Google
+              <svg className="w-5 h-5" viewBox="0 0 48 48"><path fill="#EA4335" d="M24 9.5c3.54 0 6.71 1.22 9.21 3.6l6.85-6.85C35.9 2.38 30.47 0 24 0 14.62 0 6.51 5.38 2.56 13.22l7.98 6.19C12.43 13.72 17.74 9.5 24 9.5z"></path><path fill="#4285F4" d="M46.98 24.55c0-1.57-.15-3.09-.38-4.55H24v9.02h12.94c-.58 2.96-2.26 5.48-4.78 7.18l7.73 6c4.51-4.18 7.09-10.36 7.09-17.65z"></path><path fill="#FBBC05" d="M10.53 28.59c-.48-1.45-.76-2.99-.76-4.59s.27-3.14.76-4.59l-7.98-6.19C.92 16.46 0 20.12 0 24c0 3.88.92 7.54 2.56 10.78l7.97-6.19z"></path><path fill="#34A853" d="M24 48c6.48 0 11.93-2.13 15.89-5.81l-7.73-6c-2.15 1.45-4.92 2.3-8.16 2.3-6.26 0-11.57-4.22-13.47-9.91l-7.98 6.19C6.51 42.62 14.62 48 24 48z"></path><path fill="none" d="M0 0h48v48H0z"></path></svg>
+              <span>Sign in with Google</span>
             </button>
           )}
         </div>
@@ -145,13 +154,16 @@ function App() {
         {user ? (
           isAdmin ? <AdminView user={user} /> : <UserDashboard user={user} isAuthorized={isAuthorized} />
         ) : (
-          <div className="text-center">
+          <div className="text-center bg-white/80 backdrop-blur-md p-8 rounded-lg shadow-lg">
             <h2 className="text-2xl font-semibold text-gray-700">Welcome!</h2>
-            <p className="text-gray-500 mt-2">Please log in to view your payment status.</p>
+            <p className="text-gray-600 mt-2">Please login with your assigned Gmail account to view your payment status.</p>
             {authError && <p className="text-red-500 mt-4">{authError}</p>}
           </div>
         )}
       </main>
+      <footer className="text-center py-4 text-gray-500 text-sm">
+          <p>Payment Tracker {APP_VERSION}</p>
+      </footer>
     </div>
   );
 }
@@ -160,11 +172,15 @@ function AdminView({ user }) {
     return (
         <div className="space-y-8">
             <AdminDashboard />
-            <hr/>
-            <div>
-                <h2 className="text-3xl font-bold mb-4 text-center">My Personal Dashboard</h2>
-                <UserDashboard user={user} isAuthorized={true} />
-            </div>
+            {user.isPaymentUser && (
+                <>
+                    <hr className="border-t-2 border-gray-300 my-8"/>
+                    <div>
+                        <h2 className="text-3xl font-bold mb-4 text-center">My Personal Dashboard</h2>
+                        <UserDashboard user={user} isAuthorized={true} />
+                    </div>
+                </>
+            )}
         </div>
     );
 }
@@ -216,7 +232,7 @@ function UserDashboard({ user, isAuthorized }) {
     const status = paidCount >= monthsDueCount ? "In Good Standing" : "Behind on Payments";
 
     return (
-    <div className="bg-white p-6 rounded-lg shadow-md">
+    <div className="bg-white/80 backdrop-blur-md p-6 rounded-lg shadow-md">
       <h2 className="text-2xl font-bold mb-4">Welcome, {userData.nickname}!</h2>
       <div className={`p-4 rounded-md mb-6 ${status === "In Good Standing" ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'}`}>
         <h3 className="font-bold text-lg">Payment Status: {status}</h3>
@@ -274,6 +290,65 @@ function DeleteConfirmationModal({ user, onConfirm, onCancel }) {
     );
 }
 
+function LoginHistory() {
+    const [history, setHistory] = useState([]);
+    const [failed, setFailed] = useState([]);
+    const [loading, setLoading] = useState(true);
+
+    useEffect(() => {
+        const fetchHistory = async () => {
+            setLoading(true);
+            const successQuery = query(collection(db, "login_history"), orderBy("timestamp", "desc"));
+            const failedQuery = query(collection(db, "failed_logins"), orderBy("timestamp", "desc"));
+
+            const [successSnapshot, failedSnapshot] = await Promise.all([
+                getDocs(successQuery),
+                getDocs(failedQuery)
+            ]);
+
+            setHistory(successSnapshot.docs.map(doc => doc.data()));
+            setFailed(failedSnapshot.docs.map(doc => doc.data()));
+            setLoading(false);
+        };
+        fetchHistory();
+    }, []);
+
+    if (loading) {
+        return <p>Loading history...</p>;
+    }
+
+    return (
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
+            <div>
+                <h3 className="text-xl font-semibold mb-2">Successful Logins</h3>
+                <div className="bg-white/80 backdrop-blur-md p-4 rounded-lg shadow-md max-h-96 overflow-y-auto">
+                    <ul className="divide-y divide-gray-200">
+                        {history.map((entry, index) => (
+                            <li key={index} className="py-2">
+                                <p className="font-semibold">{entry.email}</p>
+                                <p className="text-sm text-gray-500">{new Date(entry.timestamp?.toDate()).toLocaleString()}</p>
+                            </li>
+                        ))}
+                    </ul>
+                </div>
+            </div>
+            <div>
+                <h3 className="text-xl font-semibold mb-2 text-red-600">Unauthorized Attempts</h3>
+                 <div className="bg-white/80 backdrop-blur-md p-4 rounded-lg shadow-md max-h-96 overflow-y-auto">
+                    <ul className="divide-y divide-gray-200">
+                        {failed.map((entry, index) => (
+                            <li key={index} className="py-2">
+                                <p className="font-semibold">{entry.email}</p>
+                                <p className="text-sm text-gray-500">{new Date(entry.timestamp?.toDate()).toLocaleString()}</p>
+                            </li>
+                        ))}
+                    </ul>
+                </div>
+            </div>
+        </div>
+    );
+}
+
 function AdminDashboard() {
   const [users, setUsers] = useState([]);
   const [selectedUser, setSelectedUser] = useState(null);
@@ -282,6 +357,7 @@ function AdminDashboard() {
   const [calculatorAmount, setCalculatorAmount] = useState('');
   const [monthsToCheck, setMonthsToCheck] = useState(0);
   const [isDeleteModalOpen, setIsDeleteModalOpen] = useState(false);
+  const [showHistory, setShowHistory] = useState(false);
   
   const hasUnsavedChanges = selectedUser && JSON.stringify(selectedUser.payments || {}) !== JSON.stringify(pendingPayments || {});
 
@@ -377,7 +453,7 @@ function AdminDashboard() {
   }, {});
 
   return (
-    <div>
+    <div className="bg-white/80 backdrop-blur-md p-6 rounded-lg shadow-lg">
       {isDeleteModalOpen && (
         <DeleteConfirmationModal 
             user={selectedUser}
@@ -426,63 +502,76 @@ function AdminDashboard() {
                 </button>
             )}
           </div>
+          <hr className="my-6"/>
+          <div>
+             <button 
+                onClick={() => setShowHistory(!showHistory)}
+                className="w-full mt-3 bg-gray-500 hover:bg-gray-700 text-white font-bold py-2 px-4 rounded"
+            >
+                {showHistory ? 'Hide' : 'View'} Login History
+            </button>
+          </div>
         </div>
 
         {/* Payment Management */}
         <div className="md:col-span-2 bg-white p-6 rounded-lg shadow-md">
-          <h3 className="text-xl font-semibold mb-4">Manage Payments</h3>
-          {selectedUser ? (
-            <div>
-                <p className="mb-4">Managing payments for: <strong>{selectedUser.nickname || selectedUser.email}</strong></p>
-                <div className="bg-blue-100 p-4 rounded-lg mb-6">
-                    <h4 className="font-semibold text-blue-800">Payment Calculator</h4>
-                    <div className="flex items-center space-x-2 mt-2">
-                        <input 
-                            type="number"
-                            placeholder="Enter amount paid"
-                            value={calculatorAmount}
-                            onChange={(e) => setCalculatorAmount(e.target.value)}
-                            className="p-2 border rounded w-1/2"
-                        />
-                        <p className="text-blue-700"> = <span className="font-bold text-lg">{monthsToCheck}</span> months to check.</p>
-                    </div>
-                </div>
-
-                {Object.keys(groupedMonths).map(year => (
-                    <div key={year} className="mb-4">
-                        <h4 className="font-bold text-lg mb-2">{year}</h4>
-                        <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-6 gap-2">
-                            {groupedMonths[year].map(month => {
-                                const monthKey = `${month.getFullYear()}-${String(month.getMonth() + 1).padStart(2, '0')}`;
-                                const isPaid = pendingPayments && pendingPayments[monthKey];
-                                return (
-                                    <label key={monthKey} className="flex items-center space-x-2 p-2 bg-gray-100 rounded-md cursor-pointer hover:bg-gray-200">
-                                        <input 
-                                            type="checkbox"
-                                            checked={!!isPaid}
-                                            onChange={(e) => handlePaymentChange(monthKey, e.target.checked)}
-                                            className="h-5 w-5 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500"
-                                        />
-                                        <span>{month.toLocaleString('default', { month: 'short' })}</span>
-                                    </label>
-                                )
-                            })}
+          {showHistory ? <LoginHistory /> : (
+            <>
+              <h3 className="text-xl font-semibold mb-4">Manage Payments</h3>
+              {selectedUser ? (
+                <div>
+                    <p className="mb-4">Managing payments for: <strong>{selectedUser.nickname || selectedUser.email}</strong></p>
+                    <div className="bg-blue-100 p-4 rounded-lg mb-6">
+                        <h4 className="font-semibold text-blue-800">Payment Calculator</h4>
+                        <div className="flex items-center space-x-2 mt-2">
+                            <input 
+                                type="number"
+                                placeholder="Enter amount paid"
+                                value={calculatorAmount}
+                                onChange={(e) => setCalculatorAmount(e.target.value)}
+                                className="p-2 border rounded w-1/2"
+                            />
+                            <p className="text-blue-700"> = <span className="font-bold text-lg">{monthsToCheck}</span> months to check.</p>
                         </div>
                     </div>
-                ))}
-                
-                {hasUnsavedChanges && (
-                     <button 
-                        onClick={handleSaveChanges}
-                        className="w-full mt-4 bg-green-600 hover:bg-green-800 text-white font-bold py-3 px-4 rounded sticky bottom-4"
-                    >
-                        Save Changes
-                    </button>
-                )}
 
-            </div>
-          ) : (
-            <p className="text-gray-500">Please select a user to manage their payments.</p>
+                    {Object.keys(groupedMonths).map(year => (
+                        <div key={year} className="mb-4">
+                            <h4 className="font-bold text-lg mb-2">{year}</h4>
+                            <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-6 gap-2">
+                                {groupedMonths[year].map(month => {
+                                    const monthKey = `${month.getFullYear()}-${String(month.getMonth() + 1).padStart(2, '0')}`;
+                                    const isPaid = pendingPayments && pendingPayments[monthKey];
+                                    return (
+                                        <label key={monthKey} className="flex items-center space-x-2 p-2 bg-gray-100 rounded-md cursor-pointer hover:bg-gray-200">
+                                            <input 
+                                                type="checkbox"
+                                                checked={!!isPaid}
+                                                onChange={(e) => handlePaymentChange(monthKey, e.target.checked)}
+                                                className="h-5 w-5 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500"
+                                            />
+                                            <span>{month.toLocaleString('default', { month: 'short' })}</span>
+                                        </label>
+                                    )
+                                })}
+                            </div>
+                        </div>
+                    ))}
+                    
+                    {hasUnsavedChanges && (
+                         <button 
+                            onClick={handleSaveChanges}
+                            className="w-full mt-4 bg-green-600 hover:bg-green-800 text-white font-bold py-3 px-4 rounded sticky bottom-4"
+                        >
+                            Save Changes
+                        </button>
+                    )}
+
+                </div>
+              ) : (
+                <p className="text-gray-500">Please select a user to manage their payments.</p>
+              )}
+            </>
           )}
         </div>
       </div>
