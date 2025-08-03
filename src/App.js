@@ -33,7 +33,7 @@ const generateMonthRange = (startYear, startMonth, endYear, endMonth) => {
 };
 
 const paymentMonths = generateMonthRange(2025, 8, 2028, 7);
-const APP_VERSION = "v2.2.1";
+const APP_VERSION = "v2.3.0";
 
 // --- Components ---
 
@@ -60,27 +60,24 @@ function App() {
         const adminStatus = adminEmails.includes(currentUser.email);
         setIsAdmin(adminStatus);
 
-        const usersRef = collection(db, "users");
-        const q = query(usersRef, where("email", "==", currentUser.email));
-        const querySnapshot = await getDocs(q);
+        const userDocRef = doc(db, "users", currentUser.email);
+        const userDocSnap = await getDoc(userDocRef);
         
-        const isPaymentUser = !querySnapshot.empty;
+        const isPaymentUser = userDocSnap.exists();
 
         if (isPaymentUser) {
-            const userDoc = querySnapshot.docs[0];
-            const userData = userDoc.data();
-            
-            if (!userData.uid) {
-                await updateDoc(doc(db, "users", userDoc.id), { 
+            const userData = userDocSnap.data();
+            if (!userData.uid) { // First login, link UID and nickname
+                await updateDoc(userDocRef, { 
                     uid: currentUser.uid,
-                    nickname: currentUser.displayName || userData.email
+                    nickname: currentUser.displayName || currentUser.email
                 });
             }
-            setUser({ uid: currentUser.uid, email: currentUser.email, docId: userDoc.id, isPaymentUser, photoURL: currentUser.photoURL, displayName: currentUser.displayName });
+            setUser({ uid: currentUser.uid, email: currentUser.email, docId: userDocSnap.id, isPaymentUser: true, photoURL: currentUser.photoURL });
             setIsAuthorized(true);
             await addDoc(collection(db, "login_history"), { email: currentUser.email, timestamp: serverTimestamp(), status: "Success" });
         } else if (adminStatus) {
-            setUser({ uid: currentUser.uid, email: currentUser.email, isPaymentUser: false, photoURL: currentUser.photoURL, displayName: currentUser.displayName });
+            setUser({ uid: currentUser.uid, email: currentUser.email, isPaymentUser: false, photoURL: currentUser.photoURL });
             setIsAuthorized(true);
             await addDoc(collection(db, "login_history"), { email: currentUser.email, timestamp: serverTimestamp(), status: "Success (Admin)" });
         } else {
@@ -193,7 +190,7 @@ function UserDashboard({ user, isAuthorized }) {
         }
         const fetchUserData = async () => {
             setLoading(true);
-            const userDocRef = doc(db, "users", user.docId || user.uid);
+            const userDocRef = doc(db, "users", user.docId);
             const userDocSnap = await getDoc(userDocRef);
             if (userDocSnap.exists()) {
                 setUserData(userDocSnap.data());
@@ -385,19 +382,19 @@ function AdminDashboard() {
     e.preventDefault();
     if (!newUserEmail) return;
     
-    const userQuery = query(collection(db, "users"), where("email", "==", newUserEmail));
-    const querySnapshot = await getDocs(userQuery);
+    const userDocRef = doc(db, "users", newUserEmail);
+    const userDocSnap = await getDoc(userDocRef);
     
-    if (!querySnapshot.empty) {
+    if (userDocSnap.exists()) {
         alert("A user with this email already exists.");
         return;
     }
 
-    const newUserRef = doc(collection(db, "users"));
-    await setDoc(newUserRef, {
+    await setDoc(userDocRef, {
         email: newUserEmail,
         payments: {},
-        uid: null
+        uid: null,
+        nickname: null // Will be set on first login
     });
     
     setNewUserEmail("");
