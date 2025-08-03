@@ -63,7 +63,6 @@ function App() {
             const userDoc = querySnapshot.docs[0];
             const userData = userDoc.data();
             
-            // If this is the first login, link the Google UID and nickname to the document
             if (!userData.uid) {
                 await updateDoc(doc(db, "users", userDoc.id), { 
                     uid: currentUser.uid,
@@ -73,11 +72,17 @@ function App() {
             setUser({ uid: currentUser.uid, email: currentUser.email, docId: userDoc.id });
             setIsAuthorized(true);
         } else if (adminStatus) {
-            // This is an admin logging in who might not have a user document yet.
-            setUser({ uid: currentUser.uid, email: currentUser.email });
+            // Admin is logging in but doesn't have a user document yet. Let's create one.
+            const userDocRef = doc(db, "users", currentUser.uid);
+            await setDoc(userDocRef, {
+                email: currentUser.email,
+                nickname: currentUser.displayName,
+                payments: {},
+                uid: currentUser.uid
+            });
+            setUser({ uid: currentUser.uid, email: currentUser.email, docId: currentUser.uid });
             setIsAuthorized(true);
         } else {
-            // User is not in the database and is not an admin.
             setUser({ uid: currentUser.uid, email: currentUser.email });
             setIsAuthorized(false);
         }
@@ -138,7 +143,7 @@ function App() {
       </header>
       <main className="container mx-auto px-4 py-8">
         {user ? (
-          isAdmin ? <AdminDashboard /> : <UserDashboard user={user} isAuthorized={isAuthorized} />
+          isAdmin ? <AdminView user={user} /> : <UserDashboard user={user} isAuthorized={isAuthorized} />
         ) : (
           <div className="text-center">
             <h2 className="text-2xl font-semibold text-gray-700">Welcome!</h2>
@@ -149,6 +154,19 @@ function App() {
       </main>
     </div>
   );
+}
+
+function AdminView({ user }) {
+    return (
+        <div className="space-y-8">
+            <AdminDashboard />
+            <hr/>
+            <div>
+                <h2 className="text-3xl font-bold mb-4 text-center">My Personal Dashboard</h2>
+                <UserDashboard user={user} isAuthorized={true} />
+            </div>
+        </div>
+    );
 }
 
 function UserDashboard({ user, isAuthorized }) {
@@ -162,7 +180,7 @@ function UserDashboard({ user, isAuthorized }) {
         }
         const fetchUserData = async () => {
             setLoading(true);
-            const userDocRef = doc(db, "users", user.docId);
+            const userDocRef = doc(db, "users", user.docId || user.uid);
             const userDocSnap = await getDoc(userDocRef);
             if (userDocSnap.exists()) {
                 setUserData(userDocSnap.data());
@@ -306,8 +324,8 @@ function AdminDashboard() {
     await setDoc(newUserRef, {
         email: newUserEmail,
         payments: {},
-        uid: null, // UID will be added on first login
-        nickname: "New User" // Default nickname
+        uid: null, 
+        nickname: "New User"
     });
     
     setNewUserEmail("");
