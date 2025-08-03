@@ -39,6 +39,7 @@ const paymentMonths = generateMonthRange(2025, 8, 2028, 7);
 function App() {
   const [user, setUser] = useState(null);
   const [isAdmin, setIsAdmin] = useState(false);
+  const [isAuthorized, setIsAuthorized] = useState(false);
   const [loading, setLoading] = useState(true);
   const [authError, setAuthError] = useState(null);
 
@@ -51,28 +52,39 @@ function App() {
       if (currentUser) {
         const adminConfigDoc = await getDoc(doc(db, "config", "admins"));
         const adminEmails = adminConfigDoc.exists() ? adminConfigDoc.data().emails : [];
-        
-        // On login, find the user document created by the admin via email
+        const adminStatus = adminEmails.includes(currentUser.email);
+        setIsAdmin(adminStatus);
+
         const usersRef = collection(db, "users");
         const q = query(usersRef, where("email", "==", currentUser.email));
         const querySnapshot = await getDocs(q);
 
         if (!querySnapshot.empty) {
             const userDoc = querySnapshot.docs[0];
-            // If this is the first login, link the Google UID to the document
-            if (!userDoc.data().uid) {
-                await updateDoc(doc(db, "users", userDoc.id), { uid: currentUser.uid });
+            const userData = userDoc.data();
+            
+            // If this is the first login, link the Google UID and nickname to the document
+            if (!userData.uid) {
+                await updateDoc(doc(db, "users", userDoc.id), { 
+                    uid: currentUser.uid,
+                    nickname: currentUser.displayName || userData.email
+                });
             }
-            setUser({ uid: currentUser.uid, email: currentUser.email, displayName: currentUser.displayName });
+            setUser({ uid: currentUser.uid, email: currentUser.email, docId: userDoc.id });
+            setIsAuthorized(true);
+        } else if (adminStatus) {
+            // This is an admin logging in who might not have a user document yet.
+            setUser({ uid: currentUser.uid, email: currentUser.email });
+            setIsAuthorized(true);
         } else {
-            // User exists in Google Auth but not in our DB (not pre-registered)
-            setUser({ uid: 'unauthorized', email: currentUser.email, displayName: currentUser.displayName });
+            // User is not in the database and is not an admin.
+            setUser({ uid: currentUser.uid, email: currentUser.email });
+            setIsAuthorized(false);
         }
-        
-        setIsAdmin(adminEmails.includes(currentUser.email));
       } else {
         setUser(null);
         setIsAdmin(false);
+        setIsAuthorized(false);
       }
       setLoading(false);
     });
@@ -126,7 +138,7 @@ function App() {
       </header>
       <main className="container mx-auto px-4 py-8">
         {user ? (
-          isAdmin ? <AdminDashboard /> : <UserDashboard user={user} />
+          isAdmin ? <AdminDashboard /> : <UserDashboard user={user} isAuthorized={isAuthorized} />
         ) : (
           <div className="text-center">
             <h2 className="text-2xl font-semibold text-gray-700">Welcome!</h2>
@@ -139,18 +151,18 @@ function App() {
   );
 }
 
-function UserDashboard({ user }) {
+function UserDashboard({ user, isAuthorized }) {
     const [userData, setUserData] = useState(null);
     const [loading, setLoading] = useState(true);
     
     useEffect(() => {
-        if (user.uid === 'unauthorized') {
+        if (!isAuthorized) {
             setLoading(false);
             return;
         }
         const fetchUserData = async () => {
             setLoading(true);
-            const userDocRef = doc(db, "users", user.uid);
+            const userDocRef = doc(db, "users", user.docId);
             const userDocSnap = await getDoc(userDocRef);
             if (userDocSnap.exists()) {
                 setUserData(userDocSnap.data());
@@ -158,13 +170,13 @@ function UserDashboard({ user }) {
             setLoading(false);
         };
         fetchUserData();
-    }, [user.uid]);
+    }, [user, isAuthorized]);
 
     if (loading) {
         return <div>Loading user data...</div>;
     }
 
-    if (user.uid === 'unauthorized') {
+    if (!isAuthorized) {
         return (
             <div className="text-center bg-yellow-100 border border-yellow-400 text-yellow-700 px-4 py-3 rounded relative">
                 <strong className="font-bold">Access Denied!</strong>
@@ -187,7 +199,7 @@ function UserDashboard({ user }) {
 
     return (
     <div className="bg-white p-6 rounded-lg shadow-md">
-      <h2 className="text-2xl font-bold mb-4">Welcome, {user.displayName}!</h2>
+      <h2 className="text-2xl font-bold mb-4">Welcome, {userData.nickname}!</h2>
       <div className={`p-4 rounded-md mb-6 ${status === "In Good Standing" ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'}`}>
         <h3 className="font-bold text-lg">Payment Status: {status}</h3>
         <p>Total Paid: ${totalPaid.toFixed(2)}</p>
@@ -293,7 +305,9 @@ function AdminDashboard() {
     const newUserRef = doc(collection(db, "users"));
     await setDoc(newUserRef, {
         email: newUserEmail,
-        payments: {}
+        payments: {},
+        uid: null, // UID will be added on first login
+        nickname: "New User" // Default nickname
     });
     
     setNewUserEmail("");
@@ -382,7 +396,7 @@ function AdminDashboard() {
             <select onChange={(e) => handleUserSelect(e.target.value)} className="w-full p-2 border rounded">
                 <option value="">-- Select User --</option>
                 {users.map(user => (
-                    <option key={user.id} value={user.id}>{user.email}</option>
+                    <option key={user.id} value={user.id}>{user.nickname || user.email}</option>
                 ))}
             </select>
             {selectedUser && (
@@ -390,7 +404,7 @@ function AdminDashboard() {
                     onClick={() => setIsDeleteModalOpen(true)}
                     className="w-full mt-3 bg-red-500 hover:bg-red-700 text-white font-bold py-2 px-4 rounded"
                 >
-                    Delete {selectedUser.email}
+                    Delete {selectedUser.nickname || selectedUser.email}
                 </button>
             )}
           </div>
@@ -401,7 +415,7 @@ function AdminDashboard() {
           <h3 className="text-xl font-semibold mb-4">Manage Payments</h3>
           {selectedUser ? (
             <div>
-                <p className="mb-4">Managing payments for: <strong>{selectedUser.email}</strong></p>
+                <p className="mb-4">Managing payments for: <strong>{selectedUser.nickname || selectedUser.email}</strong></p>
                 <div className="bg-blue-100 p-4 rounded-lg mb-6">
                     <h4 className="font-semibold text-blue-800">Payment Calculator</h4>
                     <div className="flex items-center space-x-2 mt-2">
