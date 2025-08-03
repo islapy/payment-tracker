@@ -33,7 +33,7 @@ const generateMonthRange = (startYear, startMonth, endYear, endMonth) => {
 };
 
 const paymentMonths = generateMonthRange(2025, 8, 2028, 7);
-const APP_VERSION = "v2.1.0";
+const APP_VERSION = "v2.2.0";
 
 // --- Components ---
 
@@ -49,7 +49,6 @@ function App() {
     script.src = "https://cdn.tailwindcss.com";
     document.head.appendChild(script);
     
-    // Apply tropical background
     document.body.style.backgroundImage = "url('https://www.transparenttextures.com/patterns/subtle-palm-leaves.png')";
     document.body.style.backgroundColor = "#f0f4f8";
 
@@ -79,7 +78,6 @@ function App() {
             }
             setUser({ uid: currentUser.uid, email: currentUser.email, docId: userDoc.id, isPaymentUser, photoURL: currentUser.photoURL, displayName: currentUser.displayName });
             setIsAuthorized(true);
-            // Log successful login
             await addDoc(collection(db, "login_history"), { email: currentUser.email, timestamp: serverTimestamp(), status: "Success" });
         } else if (adminStatus) {
             setUser({ uid: currentUser.uid, email: currentUser.email, isPaymentUser: false, photoURL: currentUser.photoURL, displayName: currentUser.displayName });
@@ -88,7 +86,6 @@ function App() {
         } else {
             setUser({ uid: currentUser.uid, email: currentUser.email });
             setIsAuthorized(false);
-            // Log failed (unauthorized) login attempt
             await addDoc(collection(db, "failed_logins"), { email: currentUser.email, timestamp: serverTimestamp(), status: "Failed: Unauthorized" });
         }
       } else {
@@ -400,8 +397,7 @@ function AdminDashboard() {
     await setDoc(newUserRef, {
         email: newUserEmail,
         payments: {},
-        uid: null, 
-        nickname: "New User"
+        uid: null
     });
     
     setNewUserEmail("");
