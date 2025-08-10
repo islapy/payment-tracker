@@ -19,6 +19,11 @@ const app = initializeApp(firebaseConfig);
 const auth = getAuth(app);
 const db = getFirestore(app);
 
+// --- App Configuration ---
+const MONTHLY_PAYMENT = 30;
+const APP_VERSION = "v2.4.0";
+
+
 // --- Helper function to generate month range ---
 const generateMonthRange = (startYear, startMonth, endYear, endMonth) => {
     let months = [];
@@ -33,7 +38,6 @@ const generateMonthRange = (startYear, startMonth, endYear, endMonth) => {
 };
 
 const paymentMonths = generateMonthRange(2025, 8, 2028, 7);
-const APP_VERSION = "v2.3.0";
 
 // --- Components ---
 
@@ -219,7 +223,7 @@ function UserDashboard({ user, isAuthorized }) {
 
     const payments = userData.payments || {};
     const paidCount = Object.values(payments).filter(p => p).length;
-    const totalPaid = paidCount * 25;
+    const totalPaid = paidCount * MONTHLY_PAYMENT;
     const paymentsLeft = paymentMonths.length - paidCount;
     const today = new Date();
     const monthsDueCount = paymentMonths.filter(m => m <= today).length;
@@ -430,7 +434,7 @@ function AdminDashboard() {
   useEffect(() => {
       const amount = parseFloat(calculatorAmount);
       if (!isNaN(amount) && amount > 0) {
-          setMonthsToCheck(Math.floor(amount / 25));
+          setMonthsToCheck(Math.floor(amount / MONTHLY_PAYMENT));
       } else {
           setMonthsToCheck(0);
       }
