@@ -21,7 +21,7 @@ const db = getFirestore(app);
 
 // --- App Configuration ---
 const MONTHLY_PAYMENT = 30;
-const APP_VERSION = "v2.4.0";
+const APP_VERSION = "v3.1.0";
 
 
 // --- Helper function to generate month range ---
@@ -44,7 +44,6 @@ const paymentMonths = generateMonthRange(2025, 8, 2028, 7);
 function App() {
   const [user, setUser] = useState(null);
   const [isAdmin, setIsAdmin] = useState(false);
-  const [isAuthorized, setIsAuthorized] = useState(false);
   const [loading, setLoading] = useState(true);
   const [authError, setAuthError] = useState(null);
 
@@ -56,43 +55,17 @@ function App() {
     document.body.style.backgroundImage = "url('https://www.transparenttextures.com/patterns/subtle-palm-leaves.png')";
     document.body.style.backgroundColor = "#f0f4f8";
 
-
     const unsubscribe = onAuthStateChanged(auth, async (currentUser) => {
       if (currentUser) {
         const adminConfigDoc = await getDoc(doc(db, "config", "admins"));
         const adminEmails = adminConfigDoc.exists() ? adminConfigDoc.data().emails : [];
         const adminStatus = adminEmails.includes(currentUser.email);
-        setIsAdmin(adminStatus);
-
-        const userDocRef = doc(db, "users", currentUser.email);
-        const userDocSnap = await getDoc(userDocRef);
         
-        const isPaymentUser = userDocSnap.exists();
-
-        if (isPaymentUser) {
-            const userData = userDocSnap.data();
-            if (!userData.uid) { // First login, link UID and nickname
-                await updateDoc(userDocRef, { 
-                    uid: currentUser.uid,
-                    nickname: currentUser.displayName || currentUser.email
-                });
-            }
-            setUser({ uid: currentUser.uid, email: currentUser.email, docId: userDocSnap.id, isPaymentUser: true, photoURL: currentUser.photoURL });
-            setIsAuthorized(true);
-            await addDoc(collection(db, "login_history"), { email: currentUser.email, timestamp: serverTimestamp(), status: "Success" });
-        } else if (adminStatus) {
-            setUser({ uid: currentUser.uid, email: currentUser.email, isPaymentUser: false, photoURL: currentUser.photoURL });
-            setIsAuthorized(true);
-            await addDoc(collection(db, "login_history"), { email: currentUser.email, timestamp: serverTimestamp(), status: "Success (Admin)" });
-        } else {
-            setUser({ uid: currentUser.uid, email: currentUser.email });
-            setIsAuthorized(false);
-            await addDoc(collection(db, "failed_logins"), { email: currentUser.email, timestamp: serverTimestamp(), status: "Failed: Unauthorized" });
-        }
+        setUser({ email: currentUser.email, photoURL: currentUser.photoURL });
+        setIsAdmin(adminStatus);
       } else {
         setUser(null);
         setIsAdmin(false);
-        setIsAuthorized(false);
       }
       setLoading(false);
     });
@@ -106,7 +79,7 @@ function App() {
       await signInWithPopup(auth, provider);
     } catch (error) {
       console.error("Login Error:", error);
-      setAuthError("Failed to log in. Please check your Firebase configuration and security rules.");
+      setAuthError("Failed to log in. Please check your Firebase configuration.");
     }
   };
 
@@ -150,11 +123,15 @@ function App() {
       </header>
       <main className="container mx-auto px-4 py-8">
         {user ? (
-          isAdmin ? <AdminView user={user} /> : <UserDashboard user={user} isAuthorized={isAuthorized} />
+          isAdmin ? <AdminDashboard /> : 
+          <div className="text-center bg-yellow-100 border border-yellow-400 text-yellow-700 px-4 py-3 rounded relative">
+              <strong className="font-bold">Access Denied!</strong>
+              <span className="block sm:inline"> You are not an authorized administrator.</span>
+          </div>
         ) : (
           <div className="text-center bg-white/80 backdrop-blur-md p-8 rounded-lg shadow-lg">
             <h2 className="text-2xl font-semibold text-gray-700">Welcome!</h2>
-            <p className="text-gray-600 mt-2">Please login with your assigned Gmail account to view your payment status.</p>
+            <p className="text-gray-600 mt-2">Please login with an authorized admin account.</p>
             {authError && <p className="text-red-500 mt-4">{authError}</p>}
           </div>
         )}
@@ -162,99 +139,6 @@ function App() {
       <footer className="text-center py-4 text-gray-500 text-sm">
           <p>Payment Tracker {APP_VERSION}</p>
       </footer>
-    </div>
-  );
-}
-
-function AdminView({ user }) {
-    return (
-        <div className="space-y-8">
-            <AdminDashboard />
-            {user.isPaymentUser && (
-                <>
-                    <hr className="border-t-2 border-gray-300 my-8"/>
-                    <div>
-                        <h2 className="text-3xl font-bold mb-4 text-center">My Personal Dashboard</h2>
-                        <UserDashboard user={user} isAuthorized={true} />
-                    </div>
-                </>
-            )}
-        </div>
-    );
-}
-
-function UserDashboard({ user, isAuthorized }) {
-    const [userData, setUserData] = useState(null);
-    const [loading, setLoading] = useState(true);
-    
-    useEffect(() => {
-        if (!isAuthorized) {
-            setLoading(false);
-            return;
-        }
-        const fetchUserData = async () => {
-            setLoading(true);
-            const userDocRef = doc(db, "users", user.docId);
-            const userDocSnap = await getDoc(userDocRef);
-            if (userDocSnap.exists()) {
-                setUserData(userDocSnap.data());
-            }
-            setLoading(false);
-        };
-        fetchUserData();
-    }, [user, isAuthorized]);
-
-    if (loading) {
-        return <div>Loading user data...</div>;
-    }
-
-    if (!isAuthorized) {
-        return (
-            <div className="text-center bg-yellow-100 border border-yellow-400 text-yellow-700 px-4 py-3 rounded relative">
-                <strong className="font-bold">Access Denied!</strong>
-                <span className="block sm:inline"> Your account has not been registered by an administrator. Please contact an admin to get access.</span>
-            </div>
-        );
-    }
-    
-    if (!userData) {
-         return <div>Error loading user data. Please contact an admin.</div>;
-    }
-
-    const payments = userData.payments || {};
-    const paidCount = Object.values(payments).filter(p => p).length;
-    const totalPaid = paidCount * MONTHLY_PAYMENT;
-    const paymentsLeft = paymentMonths.length - paidCount;
-    const today = new Date();
-    const monthsDueCount = paymentMonths.filter(m => m <= today).length;
-    const status = paidCount >= monthsDueCount ? "In Good Standing" : "Behind on Payments";
-
-    return (
-    <div className="bg-white/80 backdrop-blur-md p-6 rounded-lg shadow-md">
-      <h2 className="text-2xl font-bold mb-4">Welcome, {userData.nickname}!</h2>
-      <div className={`p-4 rounded-md mb-6 ${status === "In Good Standing" ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'}`}>
-        <h3 className="font-bold text-lg">Payment Status: {status}</h3>
-        <p>Total Paid: ${totalPaid.toFixed(2)}</p>
-        <p className="font-bold">Total Payments Left: {paymentsLeft}</p>
-      </div>
-      
-      <div>
-        <h3 className="text-xl font-semibold mb-2">Payment History</h3>
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-            {paymentMonths.map(month => {
-                const monthKey = `${month.getFullYear()}-${String(month.getMonth() + 1).padStart(2, '0')}`;
-                const isPaid = payments[monthKey];
-                const isPastDue = month < new Date() && !isPaid;
-
-                return (
-                    <div key={monthKey} className={`p-3 rounded text-center ${isPaid ? 'bg-green-200' : isPastDue ? 'bg-red-200' : 'bg-gray-200'}`}>
-                        {month.toLocaleString('default', { month: 'short', year: 'numeric' })}
-                        <span className="block text-sm font-bold">{isPaid ? 'Paid' : isPastDue ? 'Due' : 'Upcoming'}</span>
-                    </div>
-                )
-            })}
-        </div>
-      </div>
     </div>
   );
 }
@@ -267,7 +151,7 @@ function DeleteConfirmationModal({ user, onConfirm, onCancel }) {
             <div className="bg-white p-8 rounded-lg shadow-2xl max-w-md w-full">
                 <h2 className="font-bold text-xl text-gray-800 mb-4">Are you sure?</h2>
                 <p className="text-gray-600 mb-6">
-                    You are about to permanently delete the user: <strong className="font-bold">{user.email}</strong>. This action cannot be undone.
+                    You are about to permanently delete the user: <strong className="font-bold">{user.displayName}</strong>. This action cannot be undone.
                 </p>
                 <div className="flex justify-end space-x-4">
                     <button
@@ -288,60 +172,46 @@ function DeleteConfirmationModal({ user, onConfirm, onCancel }) {
     );
 }
 
-function LoginHistory() {
-    const [history, setHistory] = useState([]);
-    const [failed, setFailed] = useState([]);
-    const [loading, setLoading] = useState(true);
-
-    useEffect(() => {
-        const fetchHistory = async () => {
-            setLoading(true);
-            const successQuery = query(collection(db, "login_history"), orderBy("timestamp", "desc"));
-            const failedQuery = query(collection(db, "failed_logins"), orderBy("timestamp", "desc"));
-
-            const [successSnapshot, failedSnapshot] = await Promise.all([
-                getDocs(successQuery),
-                getDocs(failedQuery)
-            ]);
-
-            setHistory(successSnapshot.docs.map(doc => doc.data()));
-            setFailed(failedSnapshot.docs.map(doc => doc.data()));
-            setLoading(false);
-        };
-        fetchHistory();
-    }, []);
-
-    if (loading) {
-        return <p>Loading history...</p>;
-    }
-
+function AllUsersStatus({ users }) {
     return (
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
-            <div>
-                <h3 className="text-xl font-semibold mb-2">Successful Logins</h3>
-                <div className="bg-white/80 backdrop-blur-md p-4 rounded-lg shadow-md max-h-96 overflow-y-auto">
-                    <ul className="divide-y divide-gray-200">
-                        {history.map((entry, index) => (
-                            <li key={index} className="py-2">
-                                <p className="font-semibold">{entry.email}</p>
-                                <p className="text-sm text-gray-500">{new Date(entry.timestamp?.toDate()).toLocaleString()}</p>
-                            </li>
-                        ))}
-                    </ul>
-                </div>
-            </div>
-            <div>
-                <h3 className="text-xl font-semibold mb-2 text-red-600">Unauthorized Attempts</h3>
-                 <div className="bg-white/80 backdrop-blur-md p-4 rounded-lg shadow-md max-h-96 overflow-y-auto">
-                    <ul className="divide-y divide-gray-200">
-                        {failed.map((entry, index) => (
-                            <li key={index} className="py-2">
-                                <p className="font-semibold">{entry.email}</p>
-                                <p className="text-sm text-gray-500">{new Date(entry.timestamp?.toDate()).toLocaleString()}</p>
-                            </li>
-                        ))}
-                    </ul>
-                </div>
+        <div className="bg-white p-6 rounded-lg shadow-md">
+            <h3 className="text-xl font-semibold mb-4">All Users Payment Status</h3>
+            <div className="overflow-x-auto">
+                <table className="min-w-full divide-y divide-gray-200">
+                    <thead className="bg-gray-50">
+                        <tr>
+                            <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Display Name</th>
+                            <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Status</th>
+                            <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Months Paid</th>
+                            <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Months Missed</th>
+                        </tr>
+                    </thead>
+                    <tbody className="bg-white divide-y divide-gray-200">
+                        {users.map(user => {
+                            const payments = user.payments || {};
+                            const paidCount = Object.values(payments).filter(p => p).length;
+                            const today = new Date();
+                            const dueMonths = paymentMonths.filter(m => m <= today);
+                            const missedMonths = dueMonths.filter(m => !payments[`${m.getFullYear()}-${String(m.getMonth() + 1).padStart(2, '0')}`]);
+                            const status = paidCount >= dueMonths.length ? "In Good Standing" : "Behind";
+
+                            return (
+                                <tr key={user.id} className={status === "Behind" ? "bg-red-50" : "bg-green-50"}>
+                                    <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">{user.displayName}</td>
+                                    <td className="px-6 py-4 whitespace-nowrap text-sm">
+                                        <span className={`px-2 inline-flex text-xs leading-5 font-semibold rounded-full ${status === "Behind" ? "bg-red-100 text-red-800" : "bg-green-100 text-green-800"}`}>
+                                            {status}
+                                        </span>
+                                    </td>
+                                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{paidCount} / {paymentMonths.length}</td>
+                                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                                        {missedMonths.length > 0 ? missedMonths.map(m => m.toLocaleString('default', { month: 'short' })).join(', ') : 'None'}
+                                    </td>
+                                </tr>
+                            )
+                        })}
+                    </tbody>
+                </table>
             </div>
         </div>
     );
@@ -351,11 +221,11 @@ function AdminDashboard() {
   const [users, setUsers] = useState([]);
   const [selectedUser, setSelectedUser] = useState(null);
   const [pendingPayments, setPendingPayments] = useState(null);
-  const [newUserEmail, setNewUserEmail] = useState("");
+  const [newDisplayName, setNewDisplayName] = useState("");
   const [calculatorAmount, setCalculatorAmount] = useState('');
   const [monthsToCheck, setMonthsToCheck] = useState(0);
   const [isDeleteModalOpen, setIsDeleteModalOpen] = useState(false);
-  const [showHistory, setShowHistory] = useState(false);
+  const [view, setView] = useState('manage'); // 'manage' or 'status'
   
   const hasUnsavedChanges = selectedUser && JSON.stringify(selectedUser.payments || {}) !== JSON.stringify(pendingPayments || {});
 
@@ -384,25 +254,16 @@ function AdminDashboard() {
 
   const handleAddUser = async (e) => {
     e.preventDefault();
-    if (!newUserEmail) return;
-    
-    const userDocRef = doc(db, "users", newUserEmail);
-    const userDocSnap = await getDoc(userDocRef);
-    
-    if (userDocSnap.exists()) {
-        alert("A user with this email already exists.");
-        return;
-    }
+    if (!newDisplayName) return;
 
-    await setDoc(userDocRef, {
-        email: newUserEmail,
-        payments: {},
-        uid: null,
-        nickname: null // Will be set on first login
+    const newUserRef = doc(collection(db, "users"));
+    await setDoc(newUserRef, {
+        displayName: newDisplayName,
+        payments: {}
     });
     
-    setNewUserEmail("");
-    alert("User has been added. They can now log in.");
+    setNewDisplayName("");
+    alert("User has been added.");
     fetchUsers();
   };
 
@@ -424,7 +285,7 @@ function AdminDashboard() {
   const handleConfirmDelete = async () => {
       if (!selectedUser) return;
       await deleteDoc(doc(db, "users", selectedUser.id));
-      alert(`User ${selectedUser.email} has been deleted.`);
+      alert(`User ${selectedUser.displayName} has been deleted.`);
       setIsDeleteModalOpen(false);
       setSelectedUser(null);
       setPendingPayments(null);
@@ -460,64 +321,65 @@ function AdminDashboard() {
       )}
       <h2 className="text-2xl font-bold mb-6">Admin Dashboard</h2>
       
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
-        {/* User Management */}
-        <div className="md:col-span-1 bg-white p-6 rounded-lg shadow-md">
-          <h3 className="text-xl font-semibold mb-4">Manage Users</h3>
-          <form onSubmit={handleAddUser} className="mb-6 space-y-3">
-            <h4 className="font-semibold mb-2">Add New User</h4>
-            <div>
-                <label className="block text-sm font-medium text-gray-700">User's Email</label>
-                <input
-                  type="email"
-                  value={newUserEmail}
-                  onChange={(e) => setNewUserEmail(e.target.value)}
-                  placeholder="user@example.com"
-                  className="w-full p-2 border rounded"
-                  required
-                />
-            </div>
-            <button type="submit" className="w-full bg-green-500 hover:bg-green-700 text-white font-bold py-2 px-4 rounded">
-              Add User
+      <div className="mb-6 border-b border-gray-200">
+        <nav className="-mb-px flex space-x-8" aria-label="Tabs">
+            <button onClick={() => setView('manage')} className={`whitespace-nowrap py-4 px-1 border-b-2 font-medium text-sm ${view === 'manage' ? 'border-indigo-500 text-indigo-600' : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'}`}>
+                Manage Users
             </button>
-          </form>
+            <button onClick={() => setView('status')} className={`whitespace-nowrap py-4 px-1 border-b-2 font-medium text-sm ${view === 'status' ? 'border-indigo-500 text-indigo-600' : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'}`}>
+                All Users Status
+            </button>
+        </nav>
+      </div>
 
-          <div>
-            <h4 className="font-semibold mb-2">Select User to Manage Payments</h4>
-            <select onChange={(e) => handleUserSelect(e.target.value)} className="w-full p-2 border rounded">
-                <option value="">-- Select User --</option>
-                {users.map(user => (
-                    <option key={user.id} value={user.id}>{user.nickname || user.email}</option>
-                ))}
-            </select>
-            {selectedUser && (
-                <button 
-                    onClick={() => setIsDeleteModalOpen(true)}
-                    className="w-full mt-3 bg-red-500 hover:bg-red-700 text-white font-bold py-2 px-4 rounded"
-                >
-                    Delete {selectedUser.nickname || selectedUser.email}
+      {view === 'status' && <AllUsersStatus users={users} />}
+
+      {view === 'manage' && (
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
+            <div className="md:col-span-1 bg-white p-6 rounded-lg shadow-md">
+              <h3 className="text-xl font-semibold mb-4">User Administration</h3>
+              <form onSubmit={handleAddUser} className="mb-6 space-y-3">
+                <h4 className="font-semibold mb-2">Add New User</h4>
+                <div>
+                    <label className="block text-sm font-medium text-gray-700">Display Name</label>
+                    <input
+                      type="text"
+                      value={newDisplayName}
+                      onChange={(e) => setNewDisplayName(e.target.value)}
+                      placeholder="e.g., John S."
+                      className="w-full p-2 border rounded"
+                      required
+                    />
+                </div>
+                <button type="submit" className="w-full bg-green-500 hover:bg-green-700 text-white font-bold py-2 px-4 rounded">
+                  Add User
                 </button>
-            )}
-          </div>
-          <hr className="my-6"/>
-          <div>
-             <button 
-                onClick={() => setShowHistory(!showHistory)}
-                className="w-full mt-3 bg-gray-500 hover:bg-gray-700 text-white font-bold py-2 px-4 rounded"
-            >
-                {showHistory ? 'Hide' : 'View'} Login History
-            </button>
-          </div>
-        </div>
+              </form>
 
-        {/* Payment Management */}
-        <div className="md:col-span-2 bg-white p-6 rounded-lg shadow-md">
-          {showHistory ? <LoginHistory /> : (
-            <>
+              <div>
+                <h4 className="font-semibold mb-2">Select User to Manage Payments</h4>
+                <select onChange={(e) => handleUserSelect(e.target.value)} className="w-full p-2 border rounded">
+                    <option value="">-- Select User --</option>
+                    {users.map(user => (
+                        <option key={user.id} value={user.id}>{user.displayName}</option>
+                    ))}
+                </select>
+                {selectedUser && (
+                    <button 
+                        onClick={() => setIsDeleteModalOpen(true)}
+                        className="w-full mt-3 bg-red-500 hover:bg-red-700 text-white font-bold py-2 px-4 rounded"
+                    >
+                        Delete {selectedUser.displayName}
+                    </button>
+                )}
+              </div>
+            </div>
+
+            <div className="md:col-span-2 bg-white p-6 rounded-lg shadow-md">
               <h3 className="text-xl font-semibold mb-4">Manage Payments</h3>
               {selectedUser ? (
                 <div>
-                    <p className="mb-4">Managing payments for: <strong>{selectedUser.nickname || selectedUser.email}</strong></p>
+                    <p className="mb-4">Managing payments for: <strong>{selectedUser.displayName}</strong></p>
                     <div className="bg-blue-100 p-4 rounded-lg mb-6">
                         <h4 className="font-semibold text-blue-800">Payment Calculator</h4>
                         <div className="flex items-center space-x-2 mt-2">
@@ -568,10 +430,9 @@ function AdminDashboard() {
               ) : (
                 <p className="text-gray-500">Please select a user to manage their payments.</p>
               )}
-            </>
-          )}
+            </div>
         </div>
-      </div>
+      )}
     </div>
   );
 }
