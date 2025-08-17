@@ -20,8 +20,8 @@ const auth = getAuth(app);
 const db = getFirestore(app);
 
 // --- App Configuration ---
-const MONTHLY_PAYMENT = 30;
-const APP_VERSION = "v3.1.0";
+const MONTHLY_PAYMENT = 562;
+const APP_VERSION = "v3.2.0";
 
 
 // --- Helper function to generate month range ---
@@ -217,8 +217,39 @@ function AllUsersStatus({ users }) {
     );
 }
 
+function FinancialSummary({ users, withdrawals }) {
+    const totalCollected = users.reduce((acc, user) => {
+        const paidCount = Object.values(user.payments || {}).filter(p => p).length;
+        return acc + (paidCount * MONTHLY_PAYMENT);
+    }, 0);
+
+    const totalWithdrawn = withdrawals.reduce((acc, withdrawal) => acc + withdrawal.amount, 0);
+    const currentBalance = totalCollected - totalWithdrawn;
+
+    return (
+        <div className="bg-white p-6 rounded-lg shadow-md mb-8">
+            <h3 className="text-xl font-semibold mb-4">Financial Summary</h3>
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4 text-center">
+                <div>
+                    <p className="text-sm text-gray-500">Total Collected</p>
+                    <p className="text-2xl font-bold text-green-600">₱{totalCollected.toLocaleString()}</p>
+                </div>
+                <div>
+                    <p className="text-sm text-gray-500">Total Withdrawn</p>
+                    <p className="text-2xl font-bold text-red-600">₱{totalWithdrawn.toLocaleString()}</p>
+                </div>
+                <div>
+                    <p className="text-sm text-gray-500">Current Balance</p>
+                    <p className="text-2xl font-bold text-blue-600">₱{currentBalance.toLocaleString()}</p>
+                </div>
+            </div>
+        </div>
+    );
+}
+
 function AdminDashboard() {
   const [users, setUsers] = useState([]);
+  const [withdrawals, setWithdrawals] = useState([]);
   const [selectedUser, setSelectedUser] = useState(null);
   const [pendingPayments, setPendingPayments] = useState(null);
   const [newDisplayName, setNewDisplayName] = useState("");
@@ -226,18 +257,28 @@ function AdminDashboard() {
   const [monthsToCheck, setMonthsToCheck] = useState(0);
   const [isDeleteModalOpen, setIsDeleteModalOpen] = useState(false);
   const [view, setView] = useState('manage'); // 'manage' or 'status'
+  const [withdrawalAmount, setWithdrawalAmount] = useState('');
   
   const hasUnsavedChanges = selectedUser && JSON.stringify(selectedUser.payments || {}) !== JSON.stringify(pendingPayments || {});
 
-  const fetchUsers = async () => {
+  const fetchAllData = async () => {
     const usersCollection = collection(db, "users");
-    const userSnapshot = await getDocs(usersCollection);
+    const withdrawalsCollection = collection(db, "withdrawals");
+    
+    const [userSnapshot, withdrawalSnapshot] = await Promise.all([
+        getDocs(usersCollection),
+        getDocs(query(withdrawalsCollection, orderBy("timestamp", "desc")))
+    ]);
+
     const userList = userSnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+    const withdrawalList = withdrawalSnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+    
     setUsers(userList);
+    setWithdrawals(withdrawalList);
   };
 
   useEffect(() => {
-      fetchUsers();
+      fetchAllData();
   }, []);
   
   const handleUserSelect = async (userId) => {
@@ -264,7 +305,7 @@ function AdminDashboard() {
     
     setNewDisplayName("");
     alert("User has been added.");
-    fetchUsers();
+    fetchAllData();
   };
 
   const handlePaymentChange = (monthKey, isPaid) => {
@@ -280,6 +321,7 @@ function AdminDashboard() {
       await updateDoc(userRef, { payments: pendingPayments });
       setSelectedUser(prev => ({...prev, payments: pendingPayments}));
       alert("Changes saved successfully!");
+      fetchAllData(); // Refresh summary
   };
 
   const handleConfirmDelete = async () => {
@@ -289,7 +331,23 @@ function AdminDashboard() {
       setIsDeleteModalOpen(false);
       setSelectedUser(null);
       setPendingPayments(null);
-      fetchUsers();
+      fetchAllData();
+  };
+  
+  const handleAddWithdrawal = async (e) => {
+      e.preventDefault();
+      const amount = parseFloat(withdrawalAmount);
+      if (isNaN(amount) || amount <= 0) {
+          alert("Please enter a valid amount.");
+          return;
+      }
+      await addDoc(collection(db, "withdrawals"), {
+          amount: amount,
+          timestamp: serverTimestamp()
+      });
+      setWithdrawalAmount('');
+      alert("Withdrawal recorded.");
+      fetchAllData();
   };
   
   useEffect(() => {
@@ -320,6 +378,8 @@ function AdminDashboard() {
         />
       )}
       <h2 className="text-2xl font-bold mb-6">Admin Dashboard</h2>
+      
+      <FinancialSummary users={users} withdrawals={withdrawals} />
       
       <div className="mb-6 border-b border-gray-200">
         <nav className="-mb-px flex space-x-8" aria-label="Tabs">
@@ -373,6 +433,38 @@ function AdminDashboard() {
                     </button>
                 )}
               </div>
+              
+              <hr className="my-6"/>
+              
+              <h3 className="text-xl font-semibold mb-4">Withdrawals</h3>
+              <form onSubmit={handleAddWithdrawal} className="space-y-3">
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700">Withdrawal Amount (₱)</label>
+                    <input
+                      type="number"
+                      value={withdrawalAmount}
+                      onChange={(e) => setWithdrawalAmount(e.target.value)}
+                      placeholder="e.g., 5000"
+                      className="w-full p-2 border rounded"
+                      required
+                    />
+                  </div>
+                  <button type="submit" className="w-full bg-purple-600 hover:bg-purple-800 text-white font-bold py-2 px-4 rounded">
+                      Record Withdrawal
+                  </button>
+              </form>
+              <div className="mt-4 max-h-48 overflow-y-auto">
+                  <h4 className="font-semibold mb-2">History</h4>
+                  <ul className="divide-y divide-gray-200">
+                      {withdrawals.map(w => (
+                          <li key={w.id} className="py-2">
+                              <p className="font-semibold">₱{w.amount.toLocaleString()}</p>
+                              <p className="text-xs text-gray-500">{new Date(w.timestamp?.toDate()).toLocaleString()}</p>
+                          </li>
+                      ))}
+                  </ul>
+              </div>
+
             </div>
 
             <div className="md:col-span-2 bg-white p-6 rounded-lg shadow-md">
