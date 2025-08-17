@@ -21,7 +21,7 @@ const db = getFirestore(app);
 
 // --- App Configuration ---
 const MONTHLY_PAYMENT = 562;
-const APP_VERSION = "v3.2.0";
+const APP_VERSION = "v3.2.2";
 
 
 // --- Helper function to generate month range ---
@@ -172,6 +172,35 @@ function DeleteConfirmationModal({ user, onConfirm, onCancel }) {
     );
 }
 
+function DeleteWithdrawalModal({ withdrawal, onConfirm, onCancel }) {
+    if (!withdrawal) return null;
+
+    return (
+        <div className="fixed inset-0 bg-black bg-opacity-60 flex items-center justify-center z-50 p-4">
+            <div className="bg-white p-8 rounded-lg shadow-2xl max-w-md w-full">
+                <h2 className="font-bold text-xl text-gray-800 mb-4">Are you sure?</h2>
+                <p className="text-gray-600 mb-6">
+                    You are about to delete the withdrawal of <strong className="font-bold">₱{withdrawal.amount.toLocaleString()}</strong> from {new Date(withdrawal.timestamp?.toDate()).toLocaleDateString()}. This action cannot be undone.
+                </p>
+                <div className="flex justify-end space-x-4">
+                    <button
+                        onClick={onCancel}
+                        className="bg-gray-300 hover:bg-gray-400 text-gray-800 font-bold py-2 px-4 rounded"
+                    >
+                        Cancel
+                    </button>
+                    <button
+                        onClick={onConfirm}
+                        className="bg-red-600 hover:bg-red-800 text-white font-bold py-2 px-4 rounded"
+                    >
+                        Yes, Delete Withdrawal
+                    </button>
+                </div>
+            </div>
+        </div>
+    );
+}
+
 function AllUsersStatus({ users }) {
     return (
         <div className="bg-white p-6 rounded-lg shadow-md">
@@ -256,6 +285,8 @@ function AdminDashboard() {
   const [calculatorAmount, setCalculatorAmount] = useState('');
   const [monthsToCheck, setMonthsToCheck] = useState(0);
   const [isDeleteModalOpen, setIsDeleteModalOpen] = useState(false);
+  const [isWithdrawalDeleteModalOpen, setIsWithdrawalDeleteModalOpen] = useState(false);
+  const [withdrawalToDelete, setWithdrawalToDelete] = useState(null);
   const [view, setView] = useState('manage'); // 'manage' or 'status'
   const [withdrawalAmount, setWithdrawalAmount] = useState('');
   
@@ -349,6 +380,20 @@ function AdminDashboard() {
       alert("Withdrawal recorded.");
       fetchAllData();
   };
+
+  const handleDeleteWithdrawal = (withdrawal) => {
+      setWithdrawalToDelete(withdrawal);
+      setIsWithdrawalDeleteModalOpen(true);
+  };
+
+  const handleConfirmWithdrawalDelete = async () => {
+      if (!withdrawalToDelete) return;
+      await deleteDoc(doc(db, "withdrawals", withdrawalToDelete.id));
+      alert("Withdrawal deleted.");
+      setIsWithdrawalDeleteModalOpen(false);
+      setWithdrawalToDelete(null);
+      fetchAllData();
+  };
   
   useEffect(() => {
       const amount = parseFloat(calculatorAmount);
@@ -375,6 +420,13 @@ function AdminDashboard() {
             user={selectedUser}
             onConfirm={handleConfirmDelete}
             onCancel={() => setIsDeleteModalOpen(false)}
+        />
+      )}
+      {isWithdrawalDeleteModalOpen && (
+        <DeleteWithdrawalModal
+            withdrawal={withdrawalToDelete}
+            onConfirm={handleConfirmWithdrawalDelete}
+            onCancel={() => setIsWithdrawalDeleteModalOpen(false)}
         />
       )}
       <h2 className="text-2xl font-bold mb-6">Admin Dashboard</h2>
@@ -457,9 +509,14 @@ function AdminDashboard() {
                   <h4 className="font-semibold mb-2">History</h4>
                   <ul className="divide-y divide-gray-200">
                       {withdrawals.map(w => (
-                          <li key={w.id} className="py-2">
-                              <p className="font-semibold">₱{w.amount.toLocaleString()}</p>
-                              <p className="text-xs text-gray-500">{new Date(w.timestamp?.toDate()).toLocaleString()}</p>
+                          <li key={w.id} className="py-2 flex justify-between items-center">
+                              <div>
+                                <p className="font-semibold">₱{w.amount.toLocaleString()}</p>
+                                <p className="text-xs text-gray-500">{new Date(w.timestamp?.toDate()).toLocaleString()}</p>
+                              </div>
+                              <button onClick={() => handleDeleteWithdrawal(w)} className="text-red-500 hover:text-red-700 font-bold">
+                                  &times;
+                              </button>
                           </li>
                       ))}
                   </ul>
