@@ -21,7 +21,7 @@ const db = getFirestore(app);
 
 // --- App Configuration ---
 const MONTHLY_PAYMENT = 562;
-const APP_VERSION = "v3.2.4";
+const APP_VERSION = "v3.2.5";
 
 
 // --- Helper function to generate month range ---
@@ -328,15 +328,17 @@ function AdminDashboard() {
     e.preventDefault();
     if (!newDisplayName) return;
 
-    const newUserRef = doc(collection(db, "users"));
-    await setDoc(newUserRef, {
+    const newUser = {
         displayName: newDisplayName,
         payments: {}
-    });
+    };
+
+    const newUserRef = await addDoc(collection(db, "users"), newUser);
+    
+    setUsers(prevUsers => [...prevUsers, { id: newUserRef.id, ...newUser }]);
     
     setNewDisplayName("");
     alert("User has been added.");
-    fetchAllData();
   };
 
   const handlePaymentChange = (monthKey, isPaid) => {
@@ -350,19 +352,24 @@ function AdminDashboard() {
       if (!hasUnsavedChanges) return;
       const userRef = doc(db, "users", selectedUser.id);
       await updateDoc(userRef, { payments: pendingPayments });
+      
+      const updatedUsers = users.map(u => u.id === selectedUser.id ? {...u, payments: pendingPayments} : u);
+      setUsers(updatedUsers);
       setSelectedUser(prev => ({...prev, payments: pendingPayments}));
+
       alert("Changes saved successfully!");
-      fetchAllData(); // Refresh summary
   };
 
   const handleConfirmDelete = async () => {
       if (!selectedUser) return;
       await deleteDoc(doc(db, "users", selectedUser.id));
+      
+      setUsers(users.filter(u => u.id !== selectedUser.id));
+      
       alert(`User ${selectedUser.displayName} has been deleted.`);
       setIsDeleteModalOpen(false);
       setSelectedUser(null);
       setPendingPayments(null);
-      fetchAllData();
   };
   
   const handleAddWithdrawal = async (e) => {
@@ -372,13 +379,17 @@ function AdminDashboard() {
           alert("Please enter a valid amount.");
           return;
       }
-      await addDoc(collection(db, "withdrawals"), {
+      const newWithdrawal = {
           amount: amount,
           timestamp: serverTimestamp()
-      });
+      };
+      const withdrawalRef = await addDoc(collection(db, "withdrawals"), newWithdrawal);
+      
+      // We can't get the server timestamp locally, so we refetch for accuracy
+      fetchAllData();
+
       setWithdrawalAmount('');
       alert("Withdrawal recorded.");
-      fetchAllData();
   };
 
   const handleDeleteWithdrawal = (withdrawal) => {
@@ -389,10 +400,10 @@ function AdminDashboard() {
   const handleConfirmWithdrawalDelete = async () => {
       if (!withdrawalToDelete) return;
       await deleteDoc(doc(db, "withdrawals", withdrawalToDelete.id));
+      setWithdrawals(withdrawals.filter(w => w.id !== withdrawalToDelete.id));
       alert("Withdrawal deleted.");
       setIsWithdrawalDeleteModalOpen(false);
       setWithdrawalToDelete(null);
-      fetchAllData();
   };
   
   useEffect(() => {
