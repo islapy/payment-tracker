@@ -5,13 +5,13 @@ import { getFirestore, collection, doc, setDoc, getDoc, getDocs, query, where, u
 
 // --- IMPORTANT: This is the configuration for your Firebase project. ---
 const firebaseConfig = {
-  apiKey: "AIzaSyCP75qVnnBg_KviuyNf5EPLGQPbFEE7kJc",
-  authDomain: "payment-tracker-final.firebaseapp.com",
-  projectId: "payment-tracker-final",
-  storageBucket: "payment-tracker-final.firebasestorage.app",
-  messagingSenderId: "108107433317",
-  appId: "1:108107433317:web:9682659d9b99d4e27e4d8c",
-  measurementId: "G-TRDDN2FYJ0"
+  apiKey: "AIzaSyAY6IKn5KFqkRVL2ApespGy8NGr_JrZ9ag",
+  authDomain: "payment-tracker-ba4f0.firebaseapp.com",
+  projectId: "payment-tracker-ba4f0",
+  storageBucket: "payment-tracker-ba4f0.firebasestorage.app",
+  messagingSenderId: "891300336844",
+  appId: "1:891300336844:web:581b36b86ccf155f8bde69",
+  measurementId: "G-RB7B2BGL0E"
 };
 
 // Initialize Firebase
@@ -21,7 +21,7 @@ const db = getFirestore(app);
 
 // --- App Configuration ---
 const MONTHLY_PAYMENT = 562;
-const APP_VERSION = "v3.2.2";
+const APP_VERSION = "v3.2.3";
 
 
 // --- Helper function to generate month range ---
