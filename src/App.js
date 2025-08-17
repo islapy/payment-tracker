@@ -328,14 +328,14 @@ function AdminDashboard() {
     e.preventDefault();
     if (!newDisplayName) return;
 
-    await addDoc(collection(db, "users"), {
+    const newUser = {
         displayName: newDisplayName,
         payments: {}
-    });
-    
+    };
+    const newUserRef = await addDoc(collection(db, "users"), newUser);
+    setUsers(prev => [...prev, {id: newUserRef.id, ...newUser}].sort((a, b) => a.displayName.localeCompare(b.displayName)));
     setNewDisplayName("");
     alert("User has been added.");
-    fetchAllData();
   };
 
   const handlePaymentChange = (monthKey, isPaid) => {
@@ -349,18 +349,24 @@ function AdminDashboard() {
       if (!hasUnsavedChanges) return;
       const userRef = doc(db, "users", selectedUser.id);
       await updateDoc(userRef, { payments: pendingPayments });
+      
+      const updatedUser = {...selectedUser, payments: pendingPayments};
+      setSelectedUser(updatedUser);
+      setUsers(users.map(u => u.id === selectedUser.id ? updatedUser : u));
+
       alert("Changes saved successfully!");
-      fetchAllData();
   };
 
   const handleConfirmDelete = async () => {
       if (!selectedUser) return;
       await deleteDoc(doc(db, "users", selectedUser.id));
+      
+      setUsers(users.filter(u => u.id !== selectedUser.id));
+      
       alert(`User ${selectedUser.displayName} has been deleted.`);
       setIsDeleteModalOpen(false);
       setSelectedUser(null);
       setPendingPayments(null);
-      fetchAllData();
   };
   
   const handleAddWithdrawal = async (e) => {
@@ -370,13 +376,18 @@ function AdminDashboard() {
           alert("Please enter a valid amount.");
           return;
       }
-      await addDoc(collection(db, "withdrawals"), {
+      const newWithdrawal = {
           amount: amount,
+          timestamp: new Date() // Use local time for immediate feedback
+      };
+      const withdrawalRef = await addDoc(collection(db, "withdrawals"), {
+          ...newWithdrawal,
           timestamp: serverTimestamp()
       });
+
+      setWithdrawals(prev => [{id: withdrawalRef.id, ...newWithdrawal}, ...prev]);
       setWithdrawalAmount('');
       alert("Withdrawal recorded.");
-      fetchAllData();
   };
 
   const handleDeleteWithdrawal = (withdrawal) => {
@@ -387,10 +398,12 @@ function AdminDashboard() {
   const handleConfirmWithdrawalDelete = async () => {
       if (!withdrawalToDelete) return;
       await deleteDoc(doc(db, "withdrawals", withdrawalToDelete.id));
+      
+      setWithdrawals(withdrawals.filter(w => w.id !== withdrawalToDelete.id));
+
       alert("Withdrawal deleted.");
       setIsWithdrawalDeleteModalOpen(false);
       setWithdrawalToDelete(null);
-      fetchAllData();
   };
   
   useEffect(() => {
