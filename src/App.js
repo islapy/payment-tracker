@@ -21,7 +21,7 @@ const db = getFirestore(app);
 
 // --- App Configuration ---
 const MONTHLY_PAYMENT = 562;
-const APP_VERSION = "v3.2.9";
+const APP_VERSION = "v3.3.0";
 
 
 // --- Helper function to generate month range ---
